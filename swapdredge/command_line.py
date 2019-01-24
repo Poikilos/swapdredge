@@ -2,6 +2,9 @@
 import os
 import sys
 
+commands = ['find', 'dump']
+command_reqs = {}
+command_reqs['dump'] = ['start', 'length']
 
 config = {}
 config['preview_show_before'] = 512
@@ -61,6 +64,7 @@ def endProgress():
 def main():
     paths = []
     name = None
+    command = None
 
     for i in range(1, len(sys.argv)):
         # 0 is self
@@ -84,16 +88,36 @@ def main():
             name = None
     print("config: " + str(config))
     print("paths: " + str(paths))
-
-    if config.get('find') is None:
+    did_command = 0
+    did_params = True
+    for this_command in commands:
+        if config.get(this_command) is not None:
+            did_command += 1
+            command = this_command
+            reqs = command_reqs.get(this_command)
+            if reqs is not None:
+                did_params = True
+                for req in reqs:
+                    if req not in config:
+                        did_params = False
+                        print(this_command + " requires: " + req)
+            else:
+                did_params = True
+    if did_command != 1:
+        print("Nothing done since must specify one command:")
+        for this_command in commands:
+            print("  --" + this_command)
         print("")
-        print("Missing 'find' param")
+        usage()
+        exit(1)
+    elif not did_params:
+        print("")
         usage()
         exit(1)
 
     piece_size = 1
     needle_i = 0
-    needle = config["find"]
+    needle = config.get("find")
     results = []
     byte_i = 0
     try:
@@ -109,6 +133,8 @@ def main():
     byte_i = 0
     current_path = None
     total_mb = None
+    rel_byte_i = None
+    dump_s = None
     try:
         for i in range(len(paths)):
             path = paths[i]
@@ -118,6 +144,7 @@ def main():
                 continue
             current_path = path
             total = os.stat(path).st_size
+            total_f = float(total)
             total_mb = int(os.stat(path).st_size / 1024 / 1024)
             total_mb_f = float(total_mb)
             rel_mb_byte_i = 0
@@ -125,49 +152,75 @@ def main():
             byte_i = 0
             startProgress(path + " progress")
             with open(path, 'rb') as ins:
-                while True:
-                    piece = ins.read(piece_size)
-                    if piece == "":
-                        break  # EOF
-                    if after_s is not None:
-                        # decode("utf-8") fails (invalid start byte)
-                        # after_s += piece.decode("utf-8")
-                        after_s += piece
-                        if len(after_s) >= after:
-                            print(before_s+after_s)
-                            after_s = None
-                            before_s = ""
-                    else:
-                        # decode("utf-8") fails (invalid start byte)
-                        # before_s += piece.decode("utf-8")
-                        before_s += piece
-                        if len(before_s) > before:
-                            before_s = before_s[len(before_s)-before:]
-                    if piece == needle[needle_i]:
-                        needle_i += 1
-                    else:
-                        needle_i = 0
-                    if needle_i >= len(needle):
-                        print("found at: " + str(byte_i) + "["
-                            + str(ins.tell()-piece_size) + "]")
-                        results.append(ins.tell()-piece_size)
-                        after_s = ""
-                        needle_i = 0
-                    byte_i += 1
-                    rel_mb_byte_i += 1
-                    if rel_mb_byte_i >= 1048576:
-                        rel_mb_byte_i -= rel_mb_byte_i
-                        processed_mb += 1
-                        progress(float(processed_mb) / total_mb_f)
-            endProgress()
+                if command == "find":
+                    while True:
+                        piece = ins.read(piece_size)
+                        if piece == "":
+                            break  # EOF
+                        if after_s is not None:
+                            # decode("utf-8") fails (invalid start byte)
+                            # after_s += piece.decode("utf-8")
+                            after_s += piece
+                            if len(after_s) >= after:
+                                print(before_s+after_s)
+                                after_s = None
+                                before_s = ""
+                        else:
+                            # decode("utf-8") fails (invalid start byte)
+                            # before_s += piece.decode("utf-8")
+                            before_s += piece
+                            if len(before_s) > before:
+                                before_s = before_s[len(before_s)-before:]
+                        if piece == needle[needle_i]:
+                            needle_i += 1
+                        else:
+                            needle_i = 0
+                        if needle_i >= len(needle):
+                            print("found at: " + str(byte_i) + "["
+                                + str(ins.tell()-piece_size) + "]")
+                            results.append(ins.tell()-piece_size)
+                            after_s = ""
+                            needle_i = 0
+                        byte_i += 1
+                        rel_mb_byte_i += 1
+                        if rel_mb_byte_i >= 1048576:
+                            rel_mb_byte_i -= rel_mb_byte_i
+                            processed_mb += 1
+                            progress(float(processed_mb) / total_mb_f)
+                elif command == "dump":
+                    dump_s = ""
+                    rel_byte_i = 0
+                    rel_total = int(config['length'])
+                    rel_total_f = float(rel_total)
+                    ins.seek(int(config['start']))
+                    while True:
+                        piece = ins.read(piece_size)
+                        if piece == "":
+                            break  # EOF
+                        dump_s += piece
+                        progress(float(rel_byte_i) / rel_total_f)
+                        rel_byte_i += 1
+                        if rel_byte_i >= rel_total:
+                            break
 
-            print("len(results): " + str(len(results)))
-            print("results: " + str(results))
+            endProgress()
+            if command == "find":
+                print("locations:")
+                print("  len(results): " + str(len(results)))
+                print("  results: " + str(results))
+            elif command == "dump":
+                print("")
+                print("# region dump")
+                print(str(dump_s))
+                print("# endregion dump")
     except KeyboardInterrupt:
         endProgress()
         print("User cancelled the operation")
         # print(str(current_path) + ":")
         print("at:")
+        if command == "dump":
+            byte_i = int(config['start']) + rel_byte_i
+            processed_mb = float(rel_byte_i) / 1024.0
         print("  path: " + str(current_path))
         print("  byte: " + str(byte_i))
         print("  processed_mb: " + str(processed_mb))
