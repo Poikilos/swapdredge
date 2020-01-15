@@ -1,6 +1,11 @@
 #!/usr/env python
 import os
 import sys
+import codecs
+from datetime import datetime
+import shutil
+import imghdr
+import tempfile
 
 commands = ['find', 'dump']
 command_reqs = {}
@@ -21,6 +26,118 @@ config_help['dump'] = (
     "\n  --start <byte_index>"
     "\n  --length <byte_count>"
 )
+bad_chars = []
+
+def c_to_hex(c):
+    ret = None
+    try:
+        ret = c.encode("hex")
+    except LookupError:
+        ret = codecs.encode(c.encode(), "hex")
+    return ret
+
+
+for i in range(256):
+    good_control_chars = [9, 10, 13]  # Not bad:
+    # 9 is tab (displayable)
+    # 10 is line feed (displayable)
+    # 13 is carriage return (displayable)
+    if i == 0:
+        bad_chars.append("null")
+    elif i == 127:
+        bad_chars.append("delete")
+    elif (i < 32) and (i not in good_control_chars):
+        bad_char_hex = c_to_hex(chr(i))
+        s = "control character {} (0x{})".format(
+            i,
+            bad_char_hex
+        )
+        # print(s)
+        bad_chars.append(s)
+    elif i == 254:
+        bad_chars.append("0xFE such as second part of BOM")
+    elif i == 255:
+        bad_chars.append("DEL or memory fill 1 such as 2nd part of BOM")
+        # NOTE: UTF bytes would be ordered such that the output is FEFF
+    else:
+        bad_chars.append(None)
+
+
+control_descriptions = {}
+# See https://www.asciitable.xyz/
+control_descriptions["NUL"] = "null character"
+control_descriptions["SOH"] = "start of header"
+control_descriptions["STX"] = "start of text"
+control_descriptions["ETX"] = "end of text"
+control_descriptions["EOT"] = "end of transmission"
+control_descriptions["ENQ"] = "enquiry"
+control_descriptions["ACK"] = "acknowledge"
+control_descriptions["BEL"] = "bell ring"
+control_descriptions["BS"] = "backspace"
+control_descriptions["HT"] = "horizontal tab"
+control_descriptions["LF"] = "line feed"
+control_descriptions["VT"] = "vertical tab"
+control_descriptions["FF"] = "form feed"
+control_descriptions["CR"] = "carriage return"
+control_descriptions["SO"] = "shift out"
+control_descriptions["SI"] = "shift in"
+control_descriptions["DLE"] = "data link escape"
+control_descriptions["DC1"] = "device control 1"
+control_descriptions["DC2"] = "device control 2"
+control_descriptions["DC3"] = "device control 3"
+control_descriptions["DC4"] = "device control 4"
+control_descriptions["NAK"] = "negative acknowledgement"
+control_descriptions["SYN"] = "synchronize"
+control_descriptions["ETB"] = "end transmission block"
+control_descriptions["CAN"] = "cancel"
+control_descriptions["EM"] = "end of medium"
+control_descriptions["SUB"] = "substitute"
+control_descriptions["ESC"] = "escape"
+control_descriptions["FS"] = "file separator"
+control_descriptions["GS"] = "group separator"
+control_descriptions["RS"] = "record separator"
+control_descriptions["US"] = "unit separator"
+bad_chars[0] = "NUL"
+bad_chars[1] = "SOH"
+bad_chars[2] = "STX"
+bad_chars[3] = "ETX"
+bad_chars[4] = "EOT"
+bad_chars[5] = "ENQ"
+bad_chars[6] = "ACK"
+bad_chars[7] = "BEL"
+bad_chars[8] = "BS"
+# bad_chars[9] = "HT"  # ok since displayable
+# bad_chars[10] = "LF"  # ok since displayable (after CR on Windows)
+bad_chars[11] = "VT"
+bad_chars[12] = "FF"
+# bad_chars[13] = "CR"  #ok since displayable
+bad_chars[14] = "SO"
+bad_chars[15] = "SI"
+bad_chars[16] = "DLE"
+bad_chars[17] = "DC1"
+bad_chars[18] = "DC2"
+bad_chars[19] = "DC3"
+bad_chars[20] = "DC4"
+bad_chars[21] = "NAK"
+bad_chars[22] = "SYN"
+bad_chars[23] = "ETB"
+bad_chars[24] = "CAN"
+bad_chars[25] = "EM"
+bad_chars[26] = "SUB"
+bad_chars[27] = "ESC"
+bad_chars[28] = "FS"
+bad_chars[29] = "GS"
+bad_chars[30] = "RS"
+bad_chars[31] = "US"
+for x in range(32):
+    if bad_chars[x] is not None:
+        try:
+            d = control_descriptions[bad_chars[x]]
+        except KeyError:
+            raise RuntimeError("The control_descriptions are not"
+                               " complete ({}".format(bad_chars[x])
+                               + " is missing)."
+                               " This version is broken.")
 config_help['preview_show_before'] = (
     "bytes to show before result upon find (default:"
     + str(config['preview_show_before']) + ")"
@@ -81,10 +198,38 @@ def endProgress():
     sys.stderr.write("#" * (40 - progress_x) + "]\n")
     sys.stderr.flush()
 
+def get_bad_index(c):
+    ret = None
+    c_index = ord(c)
+    # # if c == '\0':
+        # # ret = 0
+    # # elif ord(c) == 255:
+        # # ret = 255
+    if bad_chars[c_index] is not None:
+        ret = c_index
+    return ret
+
+def split_by_bad(txt):
+    results = []
+    result = ""
+    for i in range(len(txt)):
+        c = txt[i]
+        if get_bad_index(c) is not None:
+            if len(result) > 0:
+                results.append(result)
+                result = ""
+        else:
+            result += c
+    if len(result) > 0:
+        results.append(result)
+    return results
+
+
 def main():
     paths = []
     name = None
     command = None
+    good_start = None
 
     for i in range(1, len(sys.argv)):
         # 0 is self
@@ -106,8 +251,8 @@ def main():
             else:
                 paths.append(arg.strip())
             name = None
-    print("config: " + str(config))
-    print("paths: " + str(paths))
+    print("# config: " + str(config))
+    print("# paths: " + str(paths))
     did_command = 0
     did_params = True
     for this_command in commands:
@@ -156,6 +301,8 @@ def main():
     total_mb = None
     rel_byte_i = None
     dump_s = None
+    last_bad_index = None
+    bad_index = None
     try:
         for i in range(len(paths)):
             path = paths[i]
@@ -214,11 +361,28 @@ def main():
                     rel_total = int(config['length'])
                     rel_total_f = float(rel_total)
                     dump_start = int(config['start'])
+                    good_start = int(config['start'])
                     ins.seek(dump_start)
+                    any_good = False
                     while True:
                         piece = ins.read(piece_size)
                         if piece == "":
                             break  # EOF
+                        good_i = 0
+                        if not any_good:
+                            # Only count initial consecutive bad ones.
+                            bad_index = get_bad_index(piece[good_i])
+                            if bad_index is None:
+                                any_good = True
+                            else:
+                                last_bad_index = bad_index
+                            while (good_i < piece_size) and (bad_index is not None):
+                                good_i += 1
+                                good_start += 1
+                                if (good_i < piece_size):
+                                    bad_index = get_bad_index(piece[good_i])
+                                    if bad_index is not None:
+                                        last_bad_index = bad_index
                         dump_s += piece
                         progress(float(rel_byte_i) / rel_total_f)
                         rel_byte_i += 1
@@ -232,8 +396,103 @@ def main():
                 print("  results: " + str(results))
             elif command == "dump":
                 print("")
+                if good_start != dump_start:
+                    bad_char_hex = ""
+                    bad_char_msg = ""
+                    if last_bad_index is not None:
+                        bad_char_hex = "0x" + c_to_hex(chr(last_bad_index))
+                        bad_char_msg = " ({})".format(bad_chars[last_bad_index])
+                    else:
+                        bad_char_hex = "unknown"
+                    print("# The data may not dump as a string due to {} non-text characters (last was {}{}). Try starting at or after {}.".format(good_start-dump_start, bad_char_hex, bad_char_msg, good_start))
                 print("# region dump {}".format(dump_start))
-                print(str(dump_s))
+                # print(str(dump_s))
+                i = 0
+                has_bad = False
+                for c in dump_s:
+                    bad_index = get_bad_index(c)
+                    if bad_index is not None:
+                        if bad_chars[bad_index] is not None:
+                            print("# Bad character(s) exist(s) in the"
+                                  " data (found {} at offset {}"
+                                  " relative to the dump), so not all"
+                                  " of it may show "
+                                  "below.".format(bad_chars[bad_index],
+                                                  i))
+                            has_bad = True
+                            break
+                    i += 1
+                if has_bad:
+                    goods = split_by_bad(dump_s)
+                    dump_prefix = "swapdredge"
+                    today_s = datetime.today().strftime('%Y-%m-%d')
+                    now_s = datetime.now().strftime('%Y-%m-%d_%H..%M..%S')
+                    initial_this_dir_s = dump_prefix + "_" + now_s
+                    this_dir_s = initial_this_dir_s
+                    dir_i = 1
+                    this_dir_path = os.path.join(os.getcwd(), this_dir_s)
+                    while os.path.isdir(this_dir_path):
+                        this_dir_s = initial_this_dir_s + "#" + str(dir_i)
+                        this_dir_path = os.path.join(os.getcwd(), this_dir_s)
+                        dir_i += 1
+                    os.mkdir(this_dir_s)
+                    temp_path = tempfile.mkdtemp()
+
+                    print("# See also {}-#.* files in {}.".format(dump_prefix, temp_path))
+                    error("* writing {} {}-#.* file(s) to new directory '{}' due to bad characters between chunks...".format(len(goods), dump_prefix, temp_path))
+                    file_i = 0
+                    bin_count = 0
+                    detected_count = 0
+                    for good in goods:
+                        _default_ext = ".bin"
+                        ext = _default_ext
+                        if good.startswith("#!/usr/bin/env python"):
+                            ext = ".py"
+                        elif good.startswith("#!/bin/sh"):
+                            ext = ".sh"
+                        elif good.startswith("#!/bin/bash"):
+                            ext = ".sh"
+                        elif good.startswith("# "):
+                            ext = ".md"
+                        # name = dump_prefix + '{0:04d}'.format(file_i)
+                        name = dump_prefix + "-" + str(file_i) + ext
+                        path = os.path.join(temp_path, name)
+                        error("  * writing '{}'...".format(name))
+                        with open(path, 'w') as outs:
+                            outs.write(good)
+                        if ext == _default_ext:
+                            bin_count += 1
+                            img_abbrev = imghdr.what(path)
+                            if img_abbrev is not None:
+                                ext = "." + img_abbrev + ".bin"
+                                new_name = dump_prefix + "-" + str(file_i) + ext
+                                new_path = os.path.join(temp_path, name)
+                                error("  * renaming to '{}'...".format(new_name))
+                                shutil.move(path, new_path)
+                        else:
+                            detected_count += 1
+                            new_path = os.path.join(this_dir_s, name)
+                            shutil.move(path, new_path)
+                        file_i += 1
+                    if bin_count > 0:
+                        error("* wrote {} file(s) to '{}'".format(bin_count, temp_path))
+                        error("  * Recover them manually if desired,"
+                              " otherwise delete them.")
+                        error("  * Unless any are plain text, they are"
+                              " useless, since only plain text headers are"
+                              " split properly. In the case of binary files"
+                              " or raw filesystem images, see standard"
+                              " output instead and delete *.bin files"
+                              " from the temporary directory.")
+                    else:
+                        os.rmdir(temp_path)
+                    if detected_count > 0:
+                        error("* wrote {} file(s) to '{}'".format(detected_count, this_dir_s))
+                    else:
+                        os.rmdir(this_dir_s)
+
+
+                print(dump_s)
                 print("# endregion dump")
     except KeyboardInterrupt:
         endProgress()

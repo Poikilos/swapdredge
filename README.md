@@ -13,6 +13,14 @@ This is an advanced tool for searching large files. You may not get data that ca
 You can type the command for usage: `python swapdredge/command_line.py`
 
 ### Examples:
+* Here's how you could look for text files that have binary files in
+  between (after you get a number from the --find command):
+  `python command_line.py dump-sda.img --dump --start 917634477 --length 1000000 > recovered-0000.txt`
+  - Aside from standard output, the program writes separate dumps split
+    by undisplayable characters.
+  - The program changes the extensions from bin to another such as "py"
+    or "sh" for any plain text file with a known header (a shebang, or
+    just "# " for "md").
 * Here's how you could look for your missing kivy install script in your swap file, after doing an offline recovery of your swap partition using testdisk (which by default saves the image as image.dd):
 ```bash
 # requires testdisk
