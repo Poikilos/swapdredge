@@ -13,6 +13,14 @@ config_help = {}
 config_help['find'] = (
     "what word (or phrase in quotes) to find in the file (required)"
 )
+config_help['dump'] = (
+    "Dump part of the input to to standard output."
+    "Normally you would do this using any numbers from results,"
+    "\n  or subtract to see further back in the file."
+    "\n  Requires:"
+    "\n  --start <byte_index>"
+    "\n  --length <byte_count>"
+)
 config_help['preview_show_before'] = (
     "bytes to show before result upon find (default:"
     + str(config['preview_show_before']) + ")"
@@ -22,21 +30,33 @@ config_help['preview_show_after'] = (
     + str(config['preview_show_after']) + ")"
 )
 
+def error(msg):
+    sys.stderr.write(msg + "\n")
+    sys.stderr.flush()
+
+def customDie(msg, error_code=1):
+    error("")
+    error("ERROR:")
+    error(msg)
+    error("")
+    error("")
+    exit(error_code)
 
 def usage():
-    print("")
-    print("You must specify a file path and required params.")
-    print("Params are normally followed by space (but can be followed"
+    error("")
+    error("==================== Usage ====================")
+    error("Params are normally followed by space (but can be followed"
           " by equal sign instead if value has no spaces nor quotes)"
           " then a value.")
-    print("Params:")
+    error("Params:")
     for k, v in config_help.items():
-        print("--" + k)
-        print("  " + v)
-    print("")
-    print("Example:")
-    print("python " + sys.argv[0] + ' image.dd --find "this phrase"')
-    print("")
+        error("--" + k)
+        error("  " + v)
+    error("")
+    error("Example:")
+    error("python " + sys.argv[0] + ' image.dd --find "a phrase" > swapdredge_results.txt')
+    error("#(The progress would still go to stderr so that you can see it while " + sys.argv[0] + " writes to stdout, which is results.txt in the example above).")
+    error("")
 
 
 # progress bar functions by 6502 on
@@ -44,22 +64,22 @@ def usage():
 # replace-console-output-in-python>
 def startProgress(title):
     global progress_x
-    sys.stdout.write(title + ": [" + "-"*40 + "]" + chr(8)*41)
-    sys.stdout.flush()
+    sys.stderr.write(title + ": [" + "-"*40 + "]" + chr(8)*41)
+    sys.stderr.flush()
     progress_x = 0
 
 
 def progress(x):
     global progress_x
     x = int(x * 40 // 100)
-    sys.stdout.write("#" * (x - progress_x))
-    sys.stdout.flush()
+    sys.stderr.write("#" * (x - progress_x))
+    sys.stderr.flush()
     progress_x = x
 
 
 def endProgress():
-    sys.stdout.write("#" * (40 - progress_x) + "]\n")
-    sys.stdout.flush()
+    sys.stderr.write("#" * (40 - progress_x) + "]\n")
+    sys.stderr.flush()
 
 def main():
     paths = []
@@ -100,20 +120,21 @@ def main():
                 for req in reqs:
                     if req not in config:
                         did_params = False
-                        print(this_command + " requires: " + req)
+                        error(this_command + " requires: " + req)
             else:
                 did_params = True
     if did_command != 1:
-        print("Nothing done since must specify one command:")
-        for this_command in commands:
-            print("  --" + this_command)
-        print("")
         usage()
+        error("")
+        error("Nothing done since must specify one command:")
+        for this_command in commands:
+            error("  --" + this_command)
+        error("")
         exit(1)
     elif not did_params:
-        print("")
         usage()
-        exit(1)
+        customDie("You must specify the file path and required params"
+                  "\n  (See \"Usage\" above).")
 
     piece_size = 1
     needle_i = 0
@@ -140,7 +161,7 @@ def main():
             path = paths[i]
             #total = os.path.getsize(path)
             if not os.path.isfile(path):
-                print("ERROR: no file named '" + path + "'")
+                error("ERROR: no file named '" + path + "'")
                 continue
             current_path = path
             total = os.stat(path).st_size
@@ -192,7 +213,8 @@ def main():
                     rel_byte_i = 0
                     rel_total = int(config['length'])
                     rel_total_f = float(rel_total)
-                    ins.seek(int(config['start']))
+                    dump_start = int(config['start'])
+                    ins.seek(dump_start)
                     while True:
                         piece = ins.read(piece_size)
                         if piece == "":
@@ -210,7 +232,7 @@ def main():
                 print("  results: " + str(results))
             elif command == "dump":
                 print("")
-                print("# region dump")
+                print("# region dump {}".format(dump_start))
                 print(str(dump_s))
                 print("# endregion dump")
     except KeyboardInterrupt:
