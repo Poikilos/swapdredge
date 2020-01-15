@@ -11,6 +11,25 @@ commands = ['find', 'dump']
 command_reqs = {}
 command_reqs['dump'] = ['start', 'length']
 
+
+openers = {}
+# See http://dcjtech.info/topic/list-of-shebang-interpreter-directives/
+openers["sh"] = ["#!/bin/bash", "#!/bin/sh", "#!/usr/bin/env sh",
+                 "#!/usr/bin/env bash", "#!/bin/cat", "#!/usr/bin/awk",
+                 "#!/bin/ash", "#!/bin/csh", "#!/bin/busybox",
+                 "#!/bin/sed ", "#!/usr/bin/sed ", "#!/usr/bin/env sed",
+                 "#!/usr/xpg4/bin/sh", "#!/bin/tcsh"]
+openers["groovy"] = ["#!/usr/local/bin/groovy", "#!/usr/bin/env groovy"]
+openers["js"] = ["#!/usr/bin/env jsc", "#!/usr/bin/env node",
+                 "#!/usr/bin/env rhino"]
+openers["lsp"] = ["#!/usr/local/bin/sbcl"]
+openers["lua"] = ["#!/usr/bin/env lua", "#!/usr/bin/lua"]
+openers["makefile"] = ["#!/usr/bin/make"]  # full name would be makefile
+openers["pl"] = ["#!/usr/bin/env perl", "#!/usr/bin/perl"]
+openers["php"] = ["#!/usr/bin/php", "#!/usr/bin/env php"]
+openers["py"] = ["#!/usr/bin/env python"] # ends with 2, 3, or 3.4 etc
+openers["ruby"] = ["#!/usr/bin/env ruby", "#!/usr/bin/ruby"]
+
 config = {}
 config['preview_show_before'] = 512
 config['preview_show_after'] = 512
@@ -444,28 +463,30 @@ def main():
                     bin_count = 0
                     detected_count = 0
                     for good in goods:
-                        _default_ext = ".bin"
-                        ext = _default_ext
-                        if good.startswith("#!/usr/bin/env python"):
-                            ext = ".py"
-                        elif good.startswith("#!/bin/sh"):
-                            ext = ".sh"
-                        elif good.startswith("#!/bin/bash"):
-                            ext = ".sh"
+                        _default_dot_ext = ".bin"
+                        dot_ext = _default_dot_ext
+                        for k, flags in openers.items():
+                            for flag in flags:
+                                if good.startswith(flag):
+                                    dot_ext = "." + k
+                        if dot_ext != _default_dot_ext:
+                            pass
+                        elif good.startswith("#!/bin/false"):
+                            dot_ext = ".txt"
                         elif good.startswith("# "):
-                            ext = ".md"
+                            dot_ext = ".md"
                         # name = dump_prefix + '{0:04d}'.format(file_i)
-                        name = dump_prefix + "-" + str(file_i) + ext
+                        name = dump_prefix + "-" + str(file_i) + dot_ext
                         path = os.path.join(temp_path, name)
                         error("  * writing '{}'...".format(name))
                         with open(path, 'w') as outs:
                             outs.write(good)
-                        if ext == _default_ext:
+                        if dot_ext == _default_dot_ext:
                             bin_count += 1
                             img_abbrev = imghdr.what(path)
                             if img_abbrev is not None:
-                                ext = "." + img_abbrev + ".bin"
-                                new_name = dump_prefix + "-" + str(file_i) + ext
+                                dot_ext = "." + img_abbrev + ".bin"
+                                new_name = dump_prefix + "-" + str(file_i) + dot_ext
                                 new_path = os.path.join(temp_path, name)
                                 error("  * renaming to '{}'...".format(new_name))
                                 shutil.move(path, new_path)
